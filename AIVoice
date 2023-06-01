@@ -1,0 +1,202 @@
+import playsound
+import speech_recognition as sr
+import  whisper
+from gtts import gTTS
+import warnings
+import openai
+import  os
+
+from PIL import Image
+import  tensorflow.lite  as tflite
+import numpy as np
+from os import listdir
+import sounddevice as sd
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+def main():
+    # Set the sample rate and duration
+    sample_rate = 44100
+    duration = 4
+
+    # Record audio from the microphone
+    print("Recording started...")
+    audio_data = sd.rec(int(sample_rate * duration), samplerate=sample_rate, channels=1)
+    sd.wait()
+    print("Recording stopped.")
+
+    # Convert audio data to spectrogram
+    spectrogram, frequencies, times, _ = plt.specgram(audio_data[:, 0], Fs=sample_rate)
+
+    # Plot the spectrogram
+    plt.xlabel('Time (s)')
+    plt.ylabel('Frequency (Hz)')
+    plt.title('Spectrogram')
+    plt.colorbar(format='%+2.0f dB')
+
+    # Save the spectrogram as an image
+    plt.savefig('/Users/samer/Documents/pythonRoom/Nymappe/0_13.png')
+
+    # Show the spectrogram
+    plt.show()
+
+
+    # Preprocess images
+    def preprocess(img_dir, img_file):
+        img = Image.open(img_dir + '/' + img_file)
+        img = img.convert('RGB')  # Convert to RGB if necessary
+        img = img.resize((640, 480))  # Resize the image to match the model's input shape
+        img = np.array(img)
+        img = img.astype(np.float32) / 255.0  # Normalize the pixel values
+        img = np.expand_dims(img, axis=0)
+        return img
+
+
+
+    # Create interpreter<cl
+    ip = tflite.Interpreter(model_path='waeltrain8')
+    ip.allocate_tensors()
+
+    # Get input/output indices
+    input_index = ip.get_input_details()[0]['index']
+    output_index = ip.get_output_details()[0]['index']
+
+    # Load test images
+    img_dir = 'Nymappe'
+    num_correct = 0
+    for img_file in listdir(img_dir):
+        
+        # Send image to interpreter
+        img = preprocess(img_dir, img_file)
+        ip.set_tensor(input_index, img)
+
+        # Launch interpreter and get prediction
+        ip.invoke()
+        preds = ip.get_tensor(output_index)
+        
+        # Test classifications
+        label = int(img_file.split('_')[0])
+        if np.argmax(preds) == label:
+            num_correct += 1
+
+    # Display accuracy
+    num_imgs = len(listdir(img_dir))
+    print('{} matching with wake up word {}'.format(num_correct, num_imgs))
+
+    if num_correct==1:
+
+            warnings.filterwarnings("ignore")
+            openai.api_key = "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"
+
+            r = sr.Recognizer()
+            model = whisper.load_model("base")
+
+            def transcribe(audio):
+                language = 'en'
+                audio = whisper.load_audio(audio)
+                audio = whisper.pad_or_trim(audio)
+
+                mel = whisper.log_mel_spectrogram(audio).to(model.device)
+
+                _, probs = model.detect_language(mel)
+
+                options = whisper.DecodingOptions(fp16=False)
+                result = whisper.decode(model, mel, options)
+                result_text = result.text
+                return result_text
+
+
+
+            def chatgpt_api(input_text):
+                messages = [
+                    {"role": "system", "content": "You are a helpful assistant."}]
+
+                if input_text:
+                    messages.append(
+                        {"role": "user", "content": input_text},
+                    )
+                    chat_completion = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo", messages=messages
+                    )
+
+                reply = chat_completion.choices[0].message.content
+                return reply
+
+
+            def speak(text):
+                    out_text = chatgpt_api(text)
+                    out_audio = gTTS(text=out_text, lang='en', slow=False)
+                    filename = 'Temp7.mp3'
+                    out_audio.save(filename)
+                    playsound.playsound(filename)
+                    out_text = transcribe(filename)
+                    print(f"ANSWER: {out_text}")
+                    os.remove(filename)
+
+
+            def start():
+                    with sr.Microphone() as source:
+                        try:
+                            print("Say something!")
+                            # listen for audio and convert it to text
+                            audio = r.listen(source,timeout=15)
+                            text = ""
+                            p = 0
+                            with open("microphone-results.wav", "wb") as f:
+                                f.write(audio.get_wav_data())
+                                input_text = transcribe('microphone-results.wav')
+                                if "assistant" in input_text.lower():
+                                    print(f"You said: {input_text}")
+                                    out_text = "Hi Sir ,I am ready.How Can I help you?"
+                                    out_audio = gTTS(text=out_text, lang='en', slow=False)
+                                    filename = 'Temp7.mp3'
+                                    out_audio.save(filename)
+                                    playsound.playsound(filename)
+                                    out_text = transcribe(filename)
+                                    print(f"Answer: {out_text}")
+                                    os.remove(filename)
+                                    while 1:
+                                        try:
+                                            print("Say something!")
+                                            # listen for audio and convert it to text
+                                            audio = r.listen(source, timeout=4)
+                                            text = ""
+                                            p = 0
+                                            with open("microphone-results.wav", "wb") as f:
+                                                f.write(audio.get_wav_data())
+                                                input_text = transcribe('microphone-results.wav')
+                                            if "stop please" in input_text.lower():
+                                                print(f"You said: {input_text}")
+                                                out_text = "okey, have a great day"
+                                                out_audio = gTTS(text=out_text, lang='en', slow=False)
+                                                filename = 'Temp7.mp3'
+                                                out_audio.save(filename)
+                                                playsound.playsound(filename)
+                                                out_text = transcribe(filename)
+                                                print(f"Answer: {out_text}")
+                                                os.remove(filename)
+                                                break
+                                            else:
+                                                with open("microphone-results.wav", "wb") as f:
+                                                    print(f"You said: {input_text}")
+                                                    speak(input_text)
+
+                                        except sr.UnknownValueError:
+                                            print("Oops! Unable to understand the audio")
+                                        except sr.RequestError as e:
+                                            print(f"Oops! Could not request results from Google Speech Recognition service; {e}")
+
+
+
+                        except sr.UnknownValueError:
+                            print("Oops! Unable to understand the audio")
+                        except sr.RequestError as e:
+                            print(f"Oops! Could not request results from Google Speech Recognition service; {e}")
+            start()
+
+    else:
+
+        print('Wake word not recognised')
+        main()
+main()
